@@ -1,9 +1,8 @@
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import List, Any
+from typing import List
 
-from anyio.streams import file
 from fastapi import APIRouter, Depends, UploadFile, status, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy import select, insert, delete, update
@@ -11,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database import get_async_session
 from src.files.models import File
 from src.files.services import full_path_to_attr
-from fastapi_cache.decorator import cache
 
 from src.files.schemas import FileCreate
 
@@ -55,48 +53,45 @@ async def get_file_info_by_full_path(full_path: str, session: AsyncSession = Dep
     return result
 
 
-@router.post("/upload", description='Empty "path" means root path. If "exist_ok"=True, '
-                                    'file will be overwritten if exists, else raise error.',
-             status_code=status.HTTP_201_CREATED)
+@router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_file(new_file: UploadFile, path: str | None = None, comment: str | None = None,
                       exist_ok: bool = False, session: AsyncSession = Depends(get_async_session)):
-    root_path = storage.joinpath(path) if path else storage
-    root_path.mkdir(parents=True, exist_ok=True)
-    full_path = root_path.joinpath(new_file.filename)
+    """
+    Upload file.\n
+    Empty "path" means root path.\n
+    If "exist_ok"=True, file will be overwritten if exists, else raise error.
+    """
 
-    if (full_path.exists() and exist_ok) or not full_path.exists():
-        updated_at = None if not full_path.exists() else datetime.now()
-        with open(full_path, 'wb') as f:
-            shutil.copyfileobj(new_file.file, f)
-    else:
-        return {'error': 'File already exists'}
+    file_path = storage.joinpath(path) if path else storage
+    file_path.mkdir(parents=True, exist_ok=True)
+    full_path = file_path.joinpath(new_file.filename)
 
-    file_infos = root_path
+    if not (full_path.exists() and exist_ok) or full_path.exists():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="File already exists.")
+
+    updated_at = None if not full_path.exists() else datetime.now()
+    with open(full_path, 'wb') as f:
+        shutil.copyfileobj(new_file.file, f)
+
+    new_file.file.close()
 
     file_data = {
         'name': full_path.stem,
         'extension': full_path.suffix,
         'size': full_path.stat().st_size,
-        'path': str(file_infos),
+        'path': str(file_path),
         'created_at': datetime.now(),
         'updated_at': updated_at,
         'comment': comment
     }
 
-    new_file.file.close()
-
     if updated_at:
         stmt = (update(File).values(updated_at=updated_at).where(File.name == full_path.stem).
-                where(File.extension == full_path.suffix).where(File.path == str(file_infos)))
+                where(File.extension == full_path.suffix).where(File.path == str(file_path)))
     else:
         stmt = insert(File).values(**file_data)
     await session.execute(stmt)
     await session.commit()
-
-    if updated_at:
-        return {'file updated': file_data}
-    else:
-        return {'new file uploaded': file_data}
 
 
 @router.delete("/delete", status_code=status.HTTP_204_NO_CONTENT)
@@ -106,6 +101,7 @@ async def delete_file_by_full_path(full_path: str, session: AsyncSession = Depen
     Full path example: storage/pics/Photo.jpg\n
     Empty full path means root path.
     """
+
     if not Path(full_path).is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found, check path.")
 
@@ -122,6 +118,7 @@ async def get_files_infos_by_path(path: str, session: AsyncSession = Depends(get
     Path example: storage/pics\n
     Empty full path means root path.
     """
+
     query = select(File).where(File.path == str(Path(path)))
     result = await session.execute(query)
     result = result.scalars().all()
@@ -137,6 +134,7 @@ async def download_file_by_(full_path: str):
     Path example: storage/pics/Photo.jpg\n
     Empty full path means root path.
     """
+
     if not Path(full_path).exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found, check path.")
 
@@ -151,6 +149,7 @@ async def update_file_info(full_path: str, new_name: str | None = None, new_path
     Path example: storage/pics/Photo.jpg\n
     Empty full path means root path.
     """
+
     file_path = Path(full_path)
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found, check path.")
@@ -177,6 +176,7 @@ async def sync_db_with_files(session: AsyncSession = Depends(get_async_session))
     """
     Sync db info with storage.
     """
+
     files_in_db = await get_all_files_infos(session)
     files_in_db = [str(Path(files_in_db.path).joinpath(files_in_db.name + files_in_db.extension)) for files_in_db in
                    files_in_db]
