@@ -1,9 +1,8 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 
 class FileCreate(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
 
     name: str = Field(examples=['Photo'])
     extension: str = Field(examples=['.jpg'])

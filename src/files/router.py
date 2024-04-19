@@ -14,14 +14,14 @@ from src.files.services import full_path_to_attr
 from src.files.schemas import FileCreate
 
 router = APIRouter(
-    prefix="",
+    prefix="/files",
     tags=["file"]
 )
 
 storage = Path('/Users/just_bsi/PycharmProjects/test_work/src/storage')
 
 
-@router.get("/files", response_model=List[FileCreate], status_code=status.HTTP_200_OK)
+@router.get("/all", response_model=List[FileCreate], status_code=status.HTTP_200_OK)
 async def get_all_files_infos(session: AsyncSession = Depends(get_async_session)):
     """
     Get all file infos.
@@ -35,11 +35,11 @@ async def get_all_files_infos(session: AsyncSession = Depends(get_async_session)
     return result
 
 
-@router.get("/file", response_model=FileCreate, status_code=status.HTTP_200_OK)
-async def get_file_info_by_full_path(full_path: str, session: AsyncSession = Depends(get_async_session)):
+@router.get("/{full_path:path}", response_model=FileCreate, status_code=status.HTTP_200_OK)
+async def get_file_info(full_path: str, session: AsyncSession = Depends(get_async_session)):
     """
-    Get file info by full path.\n
-    Full path example: storage/pics/Photo.jpg\n
+    Get file info.\n
+    Full path example: /storage/pics/Photo.jpg\n
     Empty full path means root path.
     """
 
@@ -53,7 +53,7 @@ async def get_file_info_by_full_path(full_path: str, session: AsyncSession = Dep
     return result
 
 
-@router.post("/upload", status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED)
 async def upload_file(new_file: UploadFile, path: str | None = None, comment: str | None = None,
                       exist_ok: bool = False, session: AsyncSession = Depends(get_async_session)):
     """
@@ -66,7 +66,7 @@ async def upload_file(new_file: UploadFile, path: str | None = None, comment: st
     file_path.mkdir(parents=True, exist_ok=True)
     full_path = file_path.joinpath(new_file.filename)
 
-    if not (full_path.exists() and exist_ok) or full_path.exists():
+    if full_path.exists() and not exist_ok:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="File already exists.")
 
     updated_at = None if not full_path.exists() else datetime.now()
@@ -94,11 +94,11 @@ async def upload_file(new_file: UploadFile, path: str | None = None, comment: st
     await session.commit()
 
 
-@router.delete("/delete", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_file_by_full_path(full_path: str, session: AsyncSession = Depends(get_async_session)):
+@router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_file(full_path: str, session: AsyncSession = Depends(get_async_session)):
     """
-    Delete file from storage and db by full path.\n
-    Full path example: storage/pics/Photo.jpg\n
+    Delete file from storage and db.\n
+    Full path example: /storage/pics/Photo.jpg\n
     Empty full path means root path.
     """
 
@@ -111,11 +111,11 @@ async def delete_file_by_full_path(full_path: str, session: AsyncSession = Depen
     await session.commit()
 
 
-@router.get("/path", response_model=List[FileCreate], status_code=status.HTTP_200_OK)
+@router.get("/{path:path}", response_model=List[FileCreate], status_code=status.HTTP_200_OK)
 async def get_files_infos_by_path(path: str, session: AsyncSession = Depends(get_async_session)):
     """
     Get files infos by path.\n
-    Path example: storage/pics\n
+    Path example: /storage/pics\n
     Empty full path means root path.
     """
 
@@ -127,11 +127,11 @@ async def get_files_infos_by_path(path: str, session: AsyncSession = Depends(get
     return result
 
 
-@router.get("/download", status_code=status.HTTP_200_OK, response_class=FileResponse)
-async def download_file_by_(full_path: str):
+@router.get("/{full_path:path}/download", status_code=status.HTTP_200_OK, response_class=FileResponse)
+async def download_file(full_path: str):
     """
-    Download file by full path.\n
-    Path example: storage/pics/Photo.jpg\n
+    Download file.\n
+    Path example: /storage/pics/Photo.jpg\n
     Empty full path means root path.
     """
 
@@ -141,12 +141,12 @@ async def download_file_by_(full_path: str):
     return FileResponse(full_path)
 
 
-@router.patch("/update", status_code=status.HTTP_200_OK)
+@router.patch("/{full_path:path}", status_code=status.HTTP_200_OK)
 async def update_file_info(full_path: str, new_name: str | None = None, new_path: str | None = None,
                            new_comment: str | None = None, session: AsyncSession = Depends(get_async_session)):
     """
-    Update file info by full path.\n
-    Path example: storage/pics/Photo.jpg\n
+    Update file info.\n
+    Path example: /storage/pics/Photo.jpg\n
     Empty full path means root path.
     """
 
@@ -154,7 +154,7 @@ async def update_file_info(full_path: str, new_name: str | None = None, new_path
     if not file_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found, check path.")
 
-    file_info = await get_file_info_by_full_path(full_path, session)
+    file_info = await get_file_info(full_path, session)
 
     new_name = new_name or file_info.name
     new_path = new_path or file_info.path
