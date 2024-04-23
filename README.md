@@ -10,6 +10,7 @@
 5. Запустить ещё один терминал из папки проекта и выполнить:
    - `python3 -m venv .venv`
    - `source .venv/bin/activate`
+   - `pip install -r requirements.txt`
    - `alembic upgrade head`
    - `uvicorn src.main:app --reload --host 0.0.0.0 --port 8000`
 
