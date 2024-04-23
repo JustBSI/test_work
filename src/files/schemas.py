@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 
-class FileCreate(BaseModel):
+class FileModel(BaseModel):
 
     name: str = Field(examples=['Photo'])
     extension: str = Field(examples=['.jpg'])

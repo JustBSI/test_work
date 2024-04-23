@@ -2,6 +2,7 @@ from datetime import datetime
 from sqlalchemy import DateTime
 from src.base import Base
 from sqlalchemy.orm import mapped_column, Mapped
+from src.utils import utcnow
 
 
 class File(Base):
@@ -11,7 +12,7 @@ class File(Base):
     extension: Mapped[str] = mapped_column(nullable=False)
     size: Mapped[int] = mapped_column(nullable=False)
     path: Mapped[str] = mapped_column(nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=utcnow())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     comment: Mapped[str | None] = mapped_column(default=None)
 

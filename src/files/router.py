@@ -1,207 +1,81 @@
-import shutil
-from datetime import datetime
-from pathlib import Path
 from typing import List
-
-from fastapi import APIRouter, Depends, UploadFile, status, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select, insert, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.database import get_async_session
-from src.files.models import File
-from src.files.services import full_path_to_attr
-
-from src.files.schemas import FileCreate
+from src.files import services
+from src.files.schemas import FileModel
 
 router = APIRouter(
     prefix="/files",
     tags=["file"]
 )
 
-storage = Path('/Users/just_bsi/PycharmProjects/test_work/src/storage')
 
-
-@router.get("/all", response_model=List[FileCreate], status_code=status.HTTP_200_OK)
+@router.get("/", response_model=List[FileModel], status_code=status.HTTP_200_OK, response_description='List of files')
 async def get_all_files_infos(session: AsyncSession = Depends(get_async_session)):
+    return await services.get_all_files_infos(session)
+
+
+@router.get("/file", response_model=FileModel, status_code=status.HTTP_200_OK, response_description='File')
+async def get_file_info(file_path: str, session: AsyncSession = Depends(get_async_session)):
     """
-    Get all file infos.
+    File path example: /pics/cats/Photo.jpg or /Photo.jpg\n
+    '/' path means storage path.
     """
-
-    query = select(File)
-    result = await session.execute(query)
-    result = result.scalars().all()
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files found.")
-    return result
+    return await services.get_file_info(file_path, session)
 
 
-@router.get("/{full_path:path}", response_model=FileCreate, status_code=status.HTTP_200_OK)
-async def get_file_info(full_path: str, session: AsyncSession = Depends(get_async_session)):
-    """
-    Get file info.\n
-    Full path example: /storage/pics/Photo.jpg\n
-    Empty full path means root path.
-    """
-
-    name, extension, path = full_path_to_attr(full_path)
-
-    query = select(File).where(File.name == name).where(File.extension == extension).where(File.path == path)
-    result = await session.execute(query)
-    result = result.scalars().first()
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found, check path.")
-    return result
-
-
-@router.post("/", status_code=status.HTTP_201_CREATED)
-async def upload_file(new_file: UploadFile, path: str | None = None, comment: str | None = None,
+@router.post("/upload", status_code=status.HTTP_201_CREATED, response_description='File uploaded')
+async def upload_file(file: UploadFile, path: str = '/', comment: str | None = None,
                       exist_ok: bool = False, session: AsyncSession = Depends(get_async_session)):
     """
-    Upload file.\n
-    Empty "path" means root path.\n
+    Path example: /pics/cats/ or /\n
+    '/' path means storage path.\n
     If "exist_ok"=True, file will be overwritten if exists, else raise error.
     """
-
-    file_path = storage.joinpath(path) if path else storage
-    file_path.mkdir(parents=True, exist_ok=True)
-    full_path = file_path.joinpath(new_file.filename)
-
-    if full_path.exists() and not exist_ok:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="File already exists.")
-
-    updated_at = None if not full_path.exists() else datetime.now()
-    with open(full_path, 'wb') as f:
-        shutil.copyfileobj(new_file.file, f)
-
-    new_file.file.close()
-
-    file_data = {
-        'name': full_path.stem,
-        'extension': full_path.suffix,
-        'size': full_path.stat().st_size,
-        'path': str(file_path),
-        'created_at': datetime.now(),
-        'updated_at': updated_at,
-        'comment': comment
-    }
-
-    if updated_at:
-        stmt = (update(File).values(updated_at=updated_at).where(File.name == full_path.stem).
-                where(File.extension == full_path.suffix).where(File.path == str(file_path)))
-    else:
-        stmt = insert(File).values(**file_data)
-    await session.execute(stmt)
-    await session.commit()
+    await services.upload_file(session, file, path, comment, exist_ok)
 
 
-@router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_file(full_path: str, session: AsyncSession = Depends(get_async_session)):
+@router.delete("/delete", status_code=status.HTTP_204_NO_CONTENT, response_description='File deleted')
+async def delete_file(file_path: str, session: AsyncSession = Depends(get_async_session)):
     """
-    Delete file from storage and db.\n
-    Full path example: /storage/pics/Photo.jpg\n
-    Empty full path means root path.
+    File path example: /pics/cats/Photo.jpg or /Photo.jpg\n
+    '/' path means storage path.
     """
-
-    if not Path(full_path).is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found, check path.")
-
-    name, extension, path = full_path_to_attr(full_path)
-    query = delete(File).where(File.name == name).where(File.extension == extension).where(File.path == path)
-    await session.execute(query)
-    await session.commit()
+    await services.delete_file(file_path, session)
 
 
-@router.get("/{path:path}", response_model=List[FileCreate], status_code=status.HTTP_200_OK)
-async def get_files_infos_by_path(path: str, session: AsyncSession = Depends(get_async_session)):
+@router.get("/path", response_model=List[FileModel], status_code=status.HTTP_200_OK,
+            response_description='List of files in path')
+async def get_files_infos_by_path(path: str = '/', session: AsyncSession = Depends(get_async_session)):
     """
-    Get files infos by path.\n
-    Path example: /storage/pics\n
-    Empty full path means root path.
+    Path example: /pics/cats/\n
+    '/' path means storage path.
     """
-
-    query = select(File).where(File.path == str(Path(path)))
-    result = await session.execute(query)
-    result = result.scalars().all()
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files found, check path.")
-    return result
+    return await services.get_files_infos_by_path(session, path)
 
 
-@router.get("/{full_path:path}/download", status_code=status.HTTP_200_OK, response_class=FileResponse)
-async def download_file(full_path: str):
+@router.get("/download", status_code=status.HTTP_200_OK, response_class=FileResponse, response_description='File')
+async def download_file(file_path: str):
     """
-    Download file.\n
-    Path example: /storage/pics/Photo.jpg\n
-    Empty full path means root path.
+    File path example: /pics/cats/Photo.jpg or /Photo.jpg\n
+    '/' path means storage path.
     """
-
-    if not Path(full_path).exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found, check path.")
-
-    return FileResponse(full_path)
+    return await services.download_file(file_path)
 
 
-@router.patch("/{full_path:path}", status_code=status.HTTP_200_OK)
-async def update_file_info(full_path: str, new_name: str | None = None, new_path: str | None = None,
+@router.patch("/update", status_code=status.HTTP_200_OK, response_description='File updated')
+async def update_file_info(file_path: str, new_name: str | None = None, new_path: str | None = None,
                            new_comment: str | None = None, session: AsyncSession = Depends(get_async_session)):
     """
-    Update file info.\n
-    Path example: /storage/pics/Photo.jpg\n
-    Empty full path means root path.
+    File path example: /pics/cats/Photo.jpg or /Photo.jpg\n
+    '/' path or new_path means storage path.\n
+    If new_path is None, file will be updated without change path.
     """
-
-    file_path = Path(full_path)
-    if not file_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found, check path.")
-
-    file_info = await get_file_info(full_path, session)
-
-    new_name = new_name or file_info.name
-    new_path = new_path or file_info.path
-    new_comment = new_comment or file_info.comment
-
-    Path(new_path).mkdir(parents=True, exist_ok=True)
-
-    file_path.replace(new_path.joinpath(new_name + file_info.extension))
-
-    stmt = (update(File).values(name=new_name, path=new_path, comment=new_comment, updated_at=datetime.now()).
-            where(File.name == file_info.name).where(File.extension == file_info.extension).
-            where(File.path == file_info.path))
-    await session.execute(stmt)
-    await session.commit()
+    await services.update_file_info(session, file_path, new_name, new_path, new_comment)
 
 
-@router.get("/sync", status_code=status.HTTP_200_OK)
-async def sync_db_with_files(session: AsyncSession = Depends(get_async_session)):
-    """
-    Sync db info with storage.
-    """
-
-    files_in_db = await get_all_files_infos(session)
-    files_in_db = [str(Path(files_in_db.path).joinpath(files_in_db.name + files_in_db.extension)) for files_in_db in
-                   files_in_db]
-    files_in_storage = storage.rglob('*.*')
-
-    for file in files_in_storage:
-        if str(file) not in files_in_db:
-            file_data = {
-                'name': file.stem,
-                'extension': file.suffix,
-                'size': file.stat().st_size,
-                'path': str(file.parent),
-                'created_at': datetime.now()
-            }
-            stmt = insert(File).values(**file_data)
-            await session.execute(stmt)
-
-    for file in files_in_db:
-        if file not in files_in_storage:
-            file = Path(file)
-            name = file.stem
-            extension = file.suffix
-            path = str(storage.joinpath(file.parent))
-
-            query = delete(File).where(File.name == name).where(File.extension == extension).where(File.path == path)
-            await session.execute(query)
-
-    await session.commit()
+@router.get("/sync", status_code=status.HTTP_200_OK, response_description='Storage == db')
+async def sync_db_with_storage(session: AsyncSession = Depends(get_async_session)):
+    await services.sync_db_with_storage(session)

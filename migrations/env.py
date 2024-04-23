@@ -2,12 +2,8 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from alembic import context
-import os
-import sys
-from src.config import DB_HOST, DB_PORT, DB_USER, DB_NAME, DB_PASS
 from src.base import Base
-
-sys.path.append(os.path.join(sys.path[0], 'src'))
+from src.config import DB_HOST, DB_PORT, DB_USER, DB_NAME, DB_PASS
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
