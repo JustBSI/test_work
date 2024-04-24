@@ -1,8 +1,10 @@
 from datetime import datetime
+
 from sqlalchemy import DateTime
-from src.base import Base
 from sqlalchemy.orm import mapped_column, Mapped
+
 from src.utils import utcnow
+from src.base import Base
 
 
 class File(Base):
