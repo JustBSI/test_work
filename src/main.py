@@ -11,4 +11,4 @@ app = FastAPI(
 
 app.include_router(router_file)
 
-Path(STORAGE).mkdir(parents=True, exist_ok=True) if not DOCKER else None
+Path(STORAGE).mkdir(parents=True, exist_ok=True) if DOCKER == 'False' else None
