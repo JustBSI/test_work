@@ -19,7 +19,7 @@ def _file_path_to_attr(file_path: str) -> (str, str, str):
 
     name = file_path.stem
     extension = file_path.suffix
-    path = '/' if str(file_path.parent) == '/' else str(file_path.parent)+'/'
+    path = '/' if str(file_path.parent) == '/' else str(file_path.parent) + '/'
 
     return name, extension, path
 
@@ -174,9 +174,9 @@ async def sync_db_with_storage(session) -> None:
                 'name': file.stem,
                 'extension': file.suffix,
                 'size': file.stat().st_size,
-                'path': '/' if file.parent == storage else '/'+'/'.join(file.parts[len(storage.parts):-1])+'/'
+                'path': '/' if file.parent == storage else '/' + '/'.join(file.parts[len(storage.parts):-1]) + '/'
             }
-            stmt = insert(File).values(name=file_data['name'] ,extension=file_data['extension'] ,size=file_data['size'],
+            stmt = insert(File).values(name=file_data['name'], extension=file_data['extension'], size=file_data['size'],
                                        path=file_data['path'])
             await session.execute(stmt)
 

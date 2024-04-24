@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DOCKER = os.getenv('DOCKER')
+DOCKER = os.getenv("DOCKER")
 DB_HOST = os.environ.get("DB_HOST") if not DOCKER else os.getenv("DOCKER_HOST")
 DB_PORT = os.environ.get("DB_PORT")
 DB_NAME = os.environ.get("DB_NAME")
