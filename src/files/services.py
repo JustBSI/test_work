@@ -10,6 +10,7 @@ from src.files import strings
 from src.files.models import File
 from src.files.schemas import FileModel
 from src.config import STORAGE_PATH as STORAGE
+from src.database import execute_stmt, execute_query
 
 storage = Path(STORAGE)
 
@@ -24,160 +25,163 @@ def _file_path_to_attr(file_path: str) -> (str, str, str):
     return name, extension, path
 
 
-async def get_all_files_infos(session) -> list[FileModel]:
-    query = select(File)
-    result = await session.execute(query)
-    result = result.scalars().all()
+class FileService:
 
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_FOUND)
+    @staticmethod
+    async def get_file_info(file_path: str, session) -> FileModel:
+        name, extension, path = _file_path_to_attr(file_path)
 
-    return result
+        query = (select(File)
+                 .where(File.name == name)
+                 .where(File.extension == extension)
+                 .where(File.path == path))
 
+        result = await execute_query(query, session)
+        result = result.scalars().first()
 
-async def get_file_info(file_path: str, session) -> FileModel:
-    name, extension, path = _file_path_to_attr(file_path)
+        if not result:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
 
-    query = (select(File)
-             .where(File.name == name)
-             .where(File.extension == extension)
-             .where(File.path == path))
+        return result
 
-    result = await session.execute(query)
-    result = result.scalars().first()
+    @staticmethod
+    async def upload_file(session, file: UploadFile, path: str = '/', comment: str | None = None,
+                          exist_ok: bool = False) -> None:
+        full_path = storage / path[1:]
+        full_path.mkdir(parents=True, exist_ok=True)
+        file_full_path = full_path / file.filename
+        updated_at = None if not file_full_path.exists() else datetime.now()
 
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
+        if file_full_path.exists() and not exist_ok:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=strings.FILE_ALREADY_EXIST)
 
-    return result
+        with open(file_full_path, 'wb') as f:
+            copyfileobj(file.file, f)
 
+        file.file.close()
 
-async def upload_file(session, file: UploadFile, path: str = '/', comment: str | None = None,
-                      exist_ok: bool = False) -> None:
-    full_path = storage / path[1:]
-    full_path.mkdir(parents=True, exist_ok=True)
-    file_full_path = full_path / file.filename
-    updated_at = None if not file_full_path.exists() else datetime.now()
+        file_data = {
+            'name': file_full_path.stem,
+            'extension': file_full_path.suffix,
+            'size': file_full_path.stat().st_size,
+            'path': path,
+            'updated_at': updated_at,
+            'comment': comment
+        }
 
-    if file_full_path.exists() and not exist_ok:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=strings.FILE_ALREADY_EXIST)
+        if updated_at:
+            stmt = (update(File).values(updated_at=updated_at)
+                    .where(File.name == file_data['name'])
+                    .where(File.extension == file_data['extension'])
+                    .where(File.path == file_data['path']))
+        else:
+            stmt = insert(File).values(**file_data)
 
-    with open(file_full_path, 'wb') as f:
-        copyfileobj(file.file, f)
+        await execute_stmt(stmt, session)
 
-    file.file.close()
+    @staticmethod
+    async def delete_file(file_path: str, session) -> None:
+        full_file_path = storage / file_path[1:]
+        if not full_file_path.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
 
-    file_data = {
-        'name': file_full_path.stem,
-        'extension': file_full_path.suffix,
-        'size': file_full_path.stat().st_size,
-        'path': path,
-        'updated_at': updated_at,
-        'comment': comment
-    }
+        name, extension, path = _file_path_to_attr(file_path)
+        stmt = (delete(File)
+                .where(File.name == name)
+                .where(File.extension == extension)
+                .where(File.path == path))
 
-    if updated_at:
-        stmt = (update(File).values(updated_at=updated_at)
-                .where(File.name == file_data['name'])
-                .where(File.extension == file_data['extension'])
-                .where(File.path == file_data['path']))
-    else:
-        stmt = insert(File).values(**file_data)
+        full_file_path.unlink()
 
-    await session.execute(stmt)
-    await session.commit()
+        await execute_stmt(stmt, session)
 
+    @staticmethod
+    async def download_file(file_path: str) -> FileResponse:
+        full_path = storage / file_path[1:]
+        if not full_path.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
 
-async def delete_file(file_path: str, session) -> None:
-    full_file_path = storage / file_path[1:]
-    if not full_file_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
+        return FileResponse(full_path)
 
-    name, extension, path = _file_path_to_attr(file_path)
-    stmt = (delete(File)
-            .where(File.name == name)
-            .where(File.extension == extension)
-            .where(File.path == path))
+    @staticmethod
+    async def update_file_info(self, session, file_path: str, new_name: str | None = None, new_path: str | None = None,
+                               new_comment: str | None = None) -> None:
+        full_file_path = storage / file_path[1:]
+        if not full_file_path.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
 
-    full_file_path.unlink()
+        file_info = await self.get_file_info(file_path, session)
+        updated_at = datetime.now() if new_name or new_path or new_comment else file_info.updated_at
+        new_name = new_name or file_info.name
+        new_path = new_path or file_info.path
+        new_comment = new_comment or file_info.comment
 
-    await session.execute(stmt)
-    await session.commit()
+        new_full_path = storage / new_path[1:]
 
+        new_full_path.mkdir(parents=True, exist_ok=True)
 
-async def get_files_infos_by_path(session, path: str = '/') -> list[FileModel]:
-    query = select(File).where(File.path == path)
-    result = await session.execute(query)
-    result = result.scalars().all()
+        full_file_path.replace(new_full_path / (new_name + file_info.extension))
 
-    if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
+        stmt = (update(File).values(name=new_name, path=new_path, comment=new_comment, updated_at=updated_at)
+                .where(File.name == file_info.name)
+                .where(File.extension == file_info.extension)
+                .where(File.path == file_info.path))
 
-    return result
-
-
-async def download_file(file_path: str) -> FileResponse:
-    full_path = storage / file_path[1:]
-    if not full_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
-
-    return FileResponse(full_path)
-
-
-async def update_file_info(session, file_path: str, new_name: str | None = None, new_path: str | None = None,
-                           new_comment: str | None = None) -> None:
-    full_file_path = storage / file_path[1:]
-    if not full_file_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
-
-    file_info = await get_file_info(file_path, session)
-    updated_at = datetime.now() if new_name or new_path or new_comment else file_info.updated_at
-    new_name = new_name or file_info.name
-    new_path = new_path or file_info.path
-    new_comment = new_comment or file_info.comment
-
-    new_full_path = storage / new_path[1:]
-
-    new_full_path.mkdir(parents=True, exist_ok=True)
-
-    full_file_path.replace(new_full_path / (new_name + file_info.extension))
-
-    stmt = (update(File).values(name=new_name, path=new_path, comment=new_comment, updated_at=updated_at)
-            .where(File.name == file_info.name)
-            .where(File.extension == file_info.extension)
-            .where(File.path == file_info.path))
-
-    await session.execute(stmt)
-    await session.commit()
+        await execute_stmt(stmt, session)
 
 
-async def sync_db_with_storage(session) -> None:
-    files_in_db = await session.execute(select(File))
-    files_in_db = files_in_db.scalars().all()
-    files_in_db = {Path(file.path) / (file.name + file.extension) for file in files_in_db}
-    files_in_storage = set(storage.rglob('*.*'))
+class StorageService:
 
-    for file in files_in_db:
-        if storage / str(file)[1:] not in files_in_storage:
-            name, extension, path = _file_path_to_attr(file)
+    @staticmethod
+    async def get_all_files_infos(session) -> list[FileModel]:
+        query = select(File)
+        result = await execute_query(query, session)
+        result = result.scalars().all()
 
-            stmt = (delete(File)
-                    .where(File.name == name)
-                    .where(File.extension == extension)
-                    .where(File.path == path))
-            await session.execute(stmt)
+        if not result:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_FOUND)
 
-    files_in_db = {storage / str(file)[1:] for file in files_in_db}
-    for file in files_in_storage:
-        if file not in files_in_db:
-            file_data = {
-                'name': file.stem,
-                'extension': file.suffix,
-                'size': file.stat().st_size,
-                'path': '/' if file.parent == storage else '/' + '/'.join(file.parts[len(storage.parts):-1]) + '/'
-            }
-            stmt = insert(File).values(name=file_data['name'], extension=file_data['extension'], size=file_data['size'],
-                                       path=file_data['path'])
-            await session.execute(stmt)
+        return result
 
-    await session.commit()
+    @staticmethod
+    async def get_files_infos_by_path(session, path: str = '/') -> list[FileModel]:
+        query = select(File).where(File.path == path)
+        result = await execute_query(query, session)
+        result = result.scalars().all()
+
+        if not result:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=strings.NO_FILE_CHECK_PATH)
+
+        return result
+
+    @staticmethod
+    async def sync_db_with_storage(self, session) -> None:
+        files_in_db = await execute_query(select(File), session)
+        files_in_db = files_in_db.scalars().all() if files_in_db else []
+        files_in_db = {Path(file.path) / (file.name + file.extension) for file in files_in_db}
+        files_in_storage = set(storage.rglob('*.*'))
+
+        for file in files_in_db:
+            if storage / str(file)[1:] not in files_in_storage:
+                name, extension, path = _file_path_to_attr(file)
+
+                stmt = (delete(File)
+                        .where(File.name == name)
+                        .where(File.extension == extension)
+                        .where(File.path == path))
+                await execute_stmt(stmt, session)
+
+        files_in_db = {storage / str(file)[1:] for file in files_in_db}
+        for file in files_in_storage:
+            if file not in files_in_db:
+                file_data = {
+                    'name': file.stem,
+                    'extension': file.suffix,
+                    'size': file.stat().st_size,
+                    'path': '/' if file.parent == storage else '/' + '/'.join(file.parts[len(storage.parts):-1]) + '/'
+                }
+                stmt = insert(File).values(name=file_data['name'],
+                                           extension=file_data['extension'],
+                                           size=file_data['size'],
+                                           path=file_data['path'])
+                await execute_stmt(stmt, session)
