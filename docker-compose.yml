@@ -1,12 +1,12 @@
-version: "1.0"
+version: "3.0"
 services:
   postgres:
-    image: postgres:16.2-alpine
+    image: postgres:16.2
     container_name: postgres
     env_file:
       - .env
     ports:
-      - 5434:5434
+      - "5434:5434"
     command:
       - "postgres"
       - "-c"
@@ -23,8 +23,8 @@ services:
       - .env
     container_name: app
     ports:
-      - 8000:8000
-    command: /app/docker/app.sh
+      - "8000:8000"
+    command: bash -c "alembic upgrade head"
     depends_on:
       postgres:
         condition: service_healthy
