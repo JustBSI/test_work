@@ -9,14 +9,13 @@ from sqlalchemy import select, insert, delete, update
 from src.files.strings import ExceptionStrings
 from src.files.models import File
 from src.files.schemas import FileModel
-from src.config import Config
 from src.database import DbRequest
 
 
 class BaseService:
 
-    def __init__(self):
-        self.storage = Path(Config.STORAGE_PATH)
+    def __init__(self, storage):
+        self.storage = Path(storage)
         self.db = DbRequest()
 
     @classmethod
